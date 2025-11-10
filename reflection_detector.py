@@ -1,133 +1,92 @@
 import cv2
 import numpy as np
-from skimage.metrics import structural_similarity as ssim
 import matplotlib.pyplot as plt
 
-def visualize_check(image_path):
+def detect_bright_spot(image_path, brightness_threshold=200):
     """
-    Visualizes the symmetry check by displaying the image halves.
-    """
-    img = cv2.imread(image_path)
-    if img is None:
-        print(f"Error: Could not read image from {image_path}")
-        return
-
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    height, width = gray.shape
-
-    # Vertical split
-    left_half = gray[:, :width // 2]
-    right_half = gray[:, width // 2:]
-    flipped_right_half = cv2.flip(right_half, 1)
-    min_width = min(left_half.shape[1], flipped_right_half.shape[1])
-    left_half_v = left_half[:, :min_width]
-    flipped_right_half_v = flipped_right_half[:, :min_width]
-
-    # Horizontal split
-    top_half = gray[:height // 2, :]
-    bottom_half = gray[height // 2:, :]
-    flipped_bottom_half = cv2.flip(bottom_half, 0)
-    min_height = min(top_half.shape[0], flipped_bottom_half.shape[0])
-    top_half_h = top_half[:min_height, :]
-    flipped_bottom_half_h = flipped_bottom_half[:min_height, :]
-
-    # Visualization
-    fig, axes = plt.subplots(2, 3, figsize=(15, 8))
-    fig.suptitle('Symmetry Visualization Check')
-
-    axes[0, 0].imshow(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
-    axes[0, 0].set_title('Original Image')
-    axes[0, 0].axis('off')
-
-    axes[0, 1].imshow(left_half_v, cmap='gray')
-    axes[0, 1].set_title('Left Half')
-    axes[0, 1].axis('off')
-
-    axes[0, 2].imshow(flipped_right_half_v, cmap='gray')
-    axes[0, 2].set_title('Flipped Right Half')
-    axes[0, 2].axis('off')
-
-    axes[1, 0].imshow(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
-    axes[1, 0].set_title('Original Image')
-    axes[1, 0].axis('off')
-
-    axes[1, 1].imshow(top_half_h, cmap='gray')
-    axes[1, 1].set_title('Top Half')
-    axes[1, 1].axis('off')
-
-    axes[1, 2].imshow(flipped_bottom_half_h, cmap='gray')
-    axes[1, 2].set_title('Flipped Bottom Half')
-    axes[1, 2].axis('off')
-
-    plt.tight_layout()
-    plt.savefig('symmetry_visualization.png')
-    print("Symmetry visualization saved to symmetry_visualization.png")
-
-
-def detect_mirror_reflection(image_path, similarity_threshold=0.7):
-    """
-    Detects mirror-like reflections in an image by checking for symmetry.
+    Detects a bright spot in the left half of an image.
 
     Args:
         image_path: The path to the image file.
-        similarity_threshold: The SSIM score above which a reflection is considered detected.
+        brightness_threshold: The average brightness level to qualify as a reflection.
 
     Returns:
-        True if a mirror reflection is detected, False otherwise.
+        A tuple (bool, box), where bool is True if a bright spot is detected,
+        and box is the bounding rectangle of the spot.
     """
     try:
         img = cv2.imread(image_path)
         if img is None:
             print(f"Error: Could not read image from {image_path}")
-            return False
+            return False, None
 
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        height, width = gray.shape
+        # Focus on the left half of the image
+        height, width, _ = img.shape
+        left_half = img[:, :width // 2]
 
-        # Check for vertical symmetry
-        left_half = gray[:, :width // 2]
-        right_half = gray[:, width // 2:]
-        flipped_right_half = cv2.flip(right_half, 1)
+        gray = cv2.cvtColor(left_half, cv2.COLOR_BGR2GRAY)
 
-        # Ensure halves are the same size for comparison
-        min_width = min(left_half.shape[1], flipped_right_half.shape[1])
-        left_half_resized = left_half[:, :min_width]
-        flipped_right_half_resized = flipped_right_half[:, :min_width]
+        # Find the brightest contour
+        blurred = cv2.GaussianBlur(gray, (11, 11), 0)
+        _, thresh = cv2.threshold(blurred, brightness_threshold, 255, cv2.THRESH_BINARY)
+        contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-        vertical_ssim = ssim(left_half_resized, flipped_right_half_resized)
+        if not contours:
+            return False, None
 
-        if vertical_ssim > similarity_threshold:
-            return True
+        # Find the largest contour by area, which is likely the main reflection
+        largest_contour = max(contours, key=cv2.contourArea)
+        x, y, w, h = cv2.boundingRect(largest_contour)
 
-        # Check for horizontal symmetry
-        top_half = gray[:height // 2, :]
-        bottom_half = gray[height // 2:, :]
-        flipped_bottom_half = cv2.flip(bottom_half, 0)
+        # Check if the average brightness within the contour is high enough
+        mask = np.zeros(gray.shape, np.uint8)
+        cv2.drawContours(mask, [largest_contour], -1, 255, -1)
+        mean_val = cv2.mean(gray, mask=mask)[0]
 
-        # Ensure halves are the same size for comparison
-        min_height = min(top_half.shape[0], flipped_bottom_half.shape[0])
-        top_half_resized = top_half[:min_height, :]
-        flipped_bottom_half_resized = flipped_bottom_half[:min_height, :]
+        if mean_val > brightness_threshold:
+            return True, (x, y, w, h)
+        else:
+            return False, None
 
-        horizontal_ssim = ssim(top_half_resized, flipped_bottom_half_resized)
-
-        if horizontal_ssim > similarity_threshold:
-            return True
-
-        return False
     except Exception as e:
         print(f"An error occurred: {e}")
-        return False
+        return False, None
+
+def visualize_detected_spot(image_path, box):
+    """
+    Draws a box around the detected bright spot and saves the image.
+
+    Args:
+        image_path: The path to the original image.
+        box: The bounding box of the detected spot.
+    """
+    try:
+        img = cv2.imread(image_path)
+        if img is None:
+            print(f"Error: Could not read image from {image_path}")
+            return
+
+        if box:
+            x, y, w, h = box
+            cv2.rectangle(img, (x, y), (x + w, y + h), (0, 0, 255), 2)
+
+        plt.imshow(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+        plt.title('Detected Bright Spot')
+        plt.axis('off')
+        plt.savefig('bright_spot_visualization.png')
+        print("Bright spot visualization saved to bright_spot_visualization.png")
+
+    except Exception as e:
+        print(f"An error occurred during visualization: {e}")
 
 if __name__ == "__main__":
     image_to_test = "ltg_video_int_img (1).png"
 
-    # --- Test Mirror Reflection Detection ---
-    if detect_mirror_reflection(image_to_test):
-        print(f"Mirror reflection detected in {image_to_test}")
-    else:
-        print(f"No mirror reflection detected in {image_to_test}")
+    # --- Test Bright Spot Detection ---
+    is_detected, spot_box = detect_bright_spot(image_to_test, brightness_threshold=100)
 
-    # --- Visualize the symmetry check ---
-    print("Displaying symmetry visualization...")
-    visualize_check(image_to_test)
+    if is_detected:
+        print(f"Bright spot detected in {image_to_test}.")
+        visualize_detected_spot(image_to_test, spot_box)
+    else:
+        print(f"No bright spot detected in {image_to_test}.")
