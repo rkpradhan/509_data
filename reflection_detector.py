@@ -54,7 +54,8 @@ def detect_bright_spot(image_path, brightness_threshold=200):
 
 def visualize_detected_spot(image_path, box):
     """
-    Draws a box around the detected bright spot and saves the image.
+    Draws a box around the detected bright spot, shows a histogram,
+    and saves the combined image.
 
     Args:
         image_path: The path to the original image.
@@ -66,15 +67,34 @@ def visualize_detected_spot(image_path, box):
             print(f"Error: Could not read image from {image_path}")
             return
 
+        # Prepare the image with the bounding box
         if box:
             x, y, w, h = box
             cv2.rectangle(img, (x, y), (x + w, y + h), (0, 0, 255), 2)
 
-        plt.imshow(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
-        plt.title('Detected Bright Spot')
-        plt.axis('off')
+        # Create a figure with two subplots
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
+        fig.suptitle('Reflection Analysis')
+
+        # Display the image on the left
+        ax1.imshow(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+        ax1.set_title('Detected Bright Spot')
+        ax1.axis('off')
+
+        # Calculate and display the histogram on the right
+        height, width, _ = img.shape
+        left_half_gray = cv2.cvtColor(img[:, :width // 2], cv2.COLOR_BGR2GRAY)
+        hist = cv2.calcHist([left_half_gray], [0], None, [256], [0, 256])
+
+        ax2.plot(hist)
+        ax2.set_title('Brightness Histogram (Left Half)')
+        ax2.set_xlabel('Pixel Intensity')
+        ax2.set_ylabel('Pixel Count')
+        ax2.grid(True)
+
+        plt.tight_layout(rect=[0, 0.03, 1, 0.95])
         plt.savefig('bright_spot_visualization.png')
-        print("Bright spot visualization saved to bright_spot_visualization.png")
+        print("Bright spot visualization with histogram saved to bright_spot_visualization.png")
 
     except Exception as e:
         print(f"An error occurred during visualization: {e}")
