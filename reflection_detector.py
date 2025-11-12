@@ -1,6 +1,5 @@
 import cv2
 import numpy as np
-import matplotlib.pyplot as plt
 
 def detect_bright_spot(image_path, brightness_threshold=200):
     """
@@ -52,14 +51,13 @@ def detect_bright_spot(image_path, brightness_threshold=200):
         print(f"An error occurred: {e}")
         return False, None
 
-def visualize_detected_spot(image_path, box):
+def highlight_reflection(image_path, box):
     """
-    Draws a box around the detected bright spot, shows a histogram,
-    and saves the combined image.
+    Draws a box around the detected reflection and saves the image.
 
     Args:
         image_path: The path to the original image.
-        box: The bounding box of the detected spot.
+        box: The bounding box of the detected reflection.
     """
     try:
         img = cv2.imread(image_path)
@@ -67,37 +65,18 @@ def visualize_detected_spot(image_path, box):
             print(f"Error: Could not read image from {image_path}")
             return
 
-        # Prepare the image with the bounding box
         if box:
             x, y, w, h = box
+            # Draw a red rectangle
             cv2.rectangle(img, (x, y), (x + w, y + h), (0, 0, 255), 2)
 
-        # Create a figure with two subplots
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
-        fig.suptitle('Reflection Analysis')
-
-        # Display the image on the left
-        ax1.imshow(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
-        ax1.set_title('Detected Bright Spot')
-        ax1.axis('off')
-
-        # Calculate and display the histogram on the right
-        height, width, _ = img.shape
-        left_half_gray = cv2.cvtColor(img[:, :width // 2], cv2.COLOR_BGR2GRAY)
-        hist = cv2.calcHist([left_half_gray], [0], None, [256], [0, 256])
-
-        ax2.plot(hist)
-        ax2.set_title('Brightness Histogram (Left Half)')
-        ax2.set_xlabel('Pixel Intensity')
-        ax2.set_ylabel('Pixel Count')
-        ax2.grid(True)
-
-        plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-        plt.savefig('bright_spot_visualization.png')
-        print("Bright spot visualization with histogram saved to bright_spot_visualization.png")
+        # Save the new image
+        output_path = 'reflection_highlighted.png'
+        cv2.imwrite(output_path, img)
+        print(f"Highlighted image saved to {output_path}")
 
     except Exception as e:
-        print(f"An error occurred during visualization: {e}")
+        print(f"An error occurred during highlighting: {e}")
 
 if __name__ == "__main__":
     image_to_test = "ltg_video_int_img (1).png"
@@ -107,6 +86,6 @@ if __name__ == "__main__":
 
     if is_detected:
         print(f"Bright spot detected in {image_to_test}.")
-        visualize_detected_spot(image_to_test, spot_box)
+        highlight_reflection(image_to_test, spot_box)
     else:
         print(f"No bright spot detected in {image_to_test}.")
