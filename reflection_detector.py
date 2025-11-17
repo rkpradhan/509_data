@@ -1,91 +1,86 @@
 import cv2
 import numpy as np
 
-def detect_bright_spot(image_path, brightness_threshold=200):
+def find_feature_mask(image_path, threshold_value=100, min_area=100, aspect_ratio_threshold=2.0, top_margin_filter=50):
     """
-    Detects a bright spot in the left half of an image.
+    Finds a prominent vertical feature in the right half of an image using thresholding,
+    morphological operations, and contour filtering.
 
     Args:
         image_path: The path to the image file.
-        brightness_threshold: The average brightness level to qualify as a reflection.
+        threshold_value: The threshold for binary segmentation.
+        min_area: The minimum contour area to consider.
+        aspect_ratio_threshold: The minimum height/width ratio to be considered vertical.
+        top_margin_filter: The number of pixels from the top to ignore.
 
     Returns:
-        A tuple (bool, box), where bool is True if a bright spot is detected,
-        and box is the bounding rectangle of the spot.
+        A binary mask of the detected feature, or None if no feature is found.
     """
     try:
         img = cv2.imread(image_path)
         if img is None:
             print(f"Error: Could not read image from {image_path}")
-            return False, None
+            return None
 
-        # Focus on the left half of the image
-        height, width, _ = img.shape
-        left_half = img[:, :width // 2]
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
-        gray = cv2.cvtColor(left_half, cv2.COLOR_BGR2GRAY)
+        # Apply Contrast Limited Adaptive Histogram Equalization (CLAHE)
+        clahe = cv2.createCLAHE(clipLimit=4.0, tileGridSize=(8, 8))
+        enhanced_gray = clahe.apply(gray)
 
-        # Find the brightest contour
-        blurred = cv2.GaussianBlur(gray, (11, 11), 0)
-        _, thresh = cv2.threshold(blurred, brightness_threshold, 255, cv2.THRESH_BINARY)
-        contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        # Isolate the right half of the image
+        height, width = enhanced_gray.shape
+        right_half = enhanced_gray[:, width // 2:]
+
+        # Apply binary thresholding
+        _, thresh = cv2.threshold(right_half, threshold_value, 255, cv2.THRESH_BINARY)
+        cv2.imwrite("debug_threshold.png", thresh)
+
+        # Use a vertical kernel for morphological closing to connect parts of the lightning bolt
+        kernel = np.ones((10, 3), np.uint8)
+        morph_closed = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
+        cv2.imwrite("debug_morph_closed.png", morph_closed)
+
+        # Find contours
+        contours, _ = cv2.findContours(morph_closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
         if not contours:
-            return False, None
+            print("No contours found after morphological operations.")
+            return None
 
-        # Find the largest contour by area, which is likely the main reflection
-        largest_contour = max(contours, key=cv2.contourArea)
-        x, y, w, h = cv2.boundingRect(largest_contour)
+        # Filter contours
+        filtered_contours = []
+        for c in contours:
+            x, y, w, h = cv2.boundingRect(c)
+            # Filter by area, position (not in the top margin), and aspect ratio
+            if cv2.contourArea(c) > min_area and y > top_margin_filter and h > w * aspect_ratio_threshold:
+                filtered_contours.append(c)
 
-        # Check if the average brightness within the contour is high enough
-        mask = np.zeros(gray.shape, np.uint8)
-        cv2.drawContours(mask, [largest_contour], -1, 255, -1)
-        mean_val = cv2.mean(gray, mask=mask)[0]
+        if not filtered_contours:
+            print("No contours passed the filtering criteria.")
+            return None
 
-        if mean_val > brightness_threshold:
-            return True, (x, y, w, h)
-        else:
-            return False, None
+        # Select the largest contour from the filtered list
+        largest_contour = max(filtered_contours, key=cv2.contourArea)
+
+        # Create a mask for the largest contour
+        mask = np.zeros(right_half.shape, dtype=np.uint8)
+        cv2.drawContours(mask, [largest_contour], -1, (255), thickness=cv2.FILLED)
+
+        return mask
 
     except Exception as e:
         print(f"An error occurred: {e}")
-        return False, None
-
-def highlight_reflection(image_path, box):
-    """
-    Draws a box around the detected reflection and saves the image.
-
-    Args:
-        image_path: The path to the original image.
-        box: The bounding box of the detected reflection.
-    """
-    try:
-        img = cv2.imread(image_path)
-        if img is None:
-            print(f"Error: Could not read image from {image_path}")
-            return
-
-        if box:
-            x, y, w, h = box
-            # Draw a red rectangle
-            cv2.rectangle(img, (x, y), (x + w, y + h), (0, 0, 255), 2)
-
-        # Save the new image
-        output_path = 'reflection_highlighted.png'
-        cv2.imwrite(output_path, img)
-        print(f"Highlighted image saved to {output_path}")
-
-    except Exception as e:
-        print(f"An error occurred during highlighting: {e}")
+        return None
 
 if __name__ == "__main__":
     image_to_test = "ltg_video_int_img (1).png"
 
-    # --- Test Bright Spot Detection ---
-    is_detected, spot_box = detect_bright_spot(image_to_test, brightness_threshold=100)
+    feature_mask = find_feature_mask(image_to_test, threshold_value=100)
 
-    if is_detected:
-        print(f"Bright spot detected in {image_to_test}.")
-        highlight_reflection(image_to_test, spot_box)
+    if feature_mask is not None:
+        output_path = 'feature_mask.png'
+        cv2.imwrite(output_path, feature_mask)
+        print(f"Feature mask saved to {output_path}")
     else:
-        print(f"No bright spot detected in {image_to_test}.")
+        print("Could not generate feature mask.")
